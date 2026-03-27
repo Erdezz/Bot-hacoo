@@ -4,7 +4,7 @@ const fs = require("fs");
 const path = require("path");
 
 // ─────────────────────────────────────────────
-// CONFIG
+// CONFIGURATION
 // ─────────────────────────────────────────────
 const WEBHOOK_URL = process.env.WEBHOOK_URL || "https://discord.com/api/webhooks/1484555324810723398/5C_TiGKAdL0HlR6bfHOHPRyhVANsTuxvAplD0F3yDps8HTm-qd358cVP7tR5dCabOVIN";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
@@ -14,16 +14,18 @@ const TELEGRAM_CHANNELS = [
   "hacoolinksydeuxx",
   "linkscrewfinds",
   "mkfashionfinds",
+  "TON_4EME_CANAL",
 ];
 
-const LOCAL_CACHE_FILE  = path.join(__dirname, "sent_links_cache.json");
-const QUEUE_FILE        = path.join(__dirname, "queue.json");
-const BATCH_SIZE        = 5;    // posts envoyés par cycle
-const INTERVAL_MS       = 3 * 60 * 1000; // 3 minutes
-const MAX_PAGES_PER_CHAN = 200;  // ~200 x ~20 msgs = ~4000 messages max par canal
+const LOCAL_CACHE_FILE = path.join(__dirname, "sent_links_cache.json");
+const QUEUE_FILE      = path.join(__dirname, "queue.json");
+
+const BATCH_SIZE      = 5;               // 5 posts par envoi
+const INTERVAL_MS     = 5 * 60 * 1000;    // Toutes les 5 minutes
+let INITIAL_SCAN      = true;            // Pour scanner plus large au début
 
 // ─────────────────────────────────────────────
-// UTILITAIRE — mélange tableau (Fisher-Yates)
+// UTILITAIRES
 // ─────────────────────────────────────────────
 function shuffle(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
@@ -33,9 +35,7 @@ function shuffle(arr) {
   return arr;
 }
 
-// ─────────────────────────────────────────────
-// CACHE — liens déjà envoyés
-// ─────────────────────────────────────────────
+// Gestion du Cache (Gist ou Local)
 async function loadSentLinks() {
   if (GITHUB_TOKEN && GIST_ID) {
     try {
@@ -43,18 +43,12 @@ async function loadSentLinks() {
         headers: { Authorization: `token ${GITHUB_TOKEN}` },
       });
       const content = Object.values(res.data.files)[0].content;
-      const links = JSON.parse(content);
-      console.log(`✅ Gist : ${links.length} liens chargés`);
-      return new Set(links);
-    } catch (err) {
-      console.warn("⚠️ Gist indisponible, fallback local :", err.message);
-    }
+      return new Set(JSON.parse(content));
+    } catch (err) { console.warn("⚠️ Fallback cache local"); }
   }
   try {
     if (fs.existsSync(LOCAL_CACHE_FILE)) {
-      const links = JSON.parse(fs.readFileSync(LOCAL_CACHE_FILE, "utf-8"));
-      console.log(`📁 Cache local : ${links.length} liens`);
-      return new Set(links);
+      return new Set(JSON.parse(fs.readFileSync(LOCAL_CACHE_FILE, "utf-8")));
     }
   } catch {}
   return new Set();
@@ -64,268 +58,145 @@ async function saveSentLinks(sentLinks) {
   const data = [...sentLinks];
   if (GITHUB_TOKEN && GIST_ID) {
     try {
-      await axios.patch(
-        `https://api.github.com/gists/${GIST_ID}`,
+      await axios.patch(`https://api.github.com/gists/${GIST_ID}`, 
         { files: { "sent_links.json": { content: JSON.stringify(data, null, 2) } } },
         { headers: { Authorization: `token ${GITHUB_TOKEN}` } }
       );
-      console.log("💾 Gist sauvegardé");
-    } catch (err) {
-      console.warn("⚠️ Erreur Gist :", err.message);
-    }
+    } catch {}
   }
-  try {
-    fs.writeFileSync(LOCAL_CACHE_FILE, JSON.stringify(data, null, 2), "utf-8");
-  } catch {}
+  fs.writeFileSync(LOCAL_CACHE_FILE, JSON.stringify(data, null, 2), "utf-8");
 }
 
-// ─────────────────────────────────────────────
-// QUEUE persistante
-// ─────────────────────────────────────────────
+// Gestion de la Queue
 function loadQueue() {
   try {
-    if (fs.existsSync(QUEUE_FILE)) {
-      const data = JSON.parse(fs.readFileSync(QUEUE_FILE, "utf-8"));
-      console.log(`📬 Queue : ${data.length} produits en attente`);
-      return data;
-    }
+    if (fs.existsSync(QUEUE_FILE)) return JSON.parse(fs.readFileSync(QUEUE_FILE, "utf-8"));
   } catch {}
   return [];
 }
 
 function saveQueue(queue) {
-  try {
-    fs.writeFileSync(QUEUE_FILE, JSON.stringify(queue, null, 2), "utf-8");
-  } catch {}
+  fs.writeFileSync(QUEUE_FILE, JSON.stringify(queue, null, 2), "utf-8");
 }
 
 // ─────────────────────────────────────────────
-// SCRAPING D'UNE PAGE TELEGRAM (via ?before=ID)
+// SCRAPING
 // ─────────────────────────────────────────────
 async function scrapePage(page, channelName, beforeId = null) {
-  const url = beforeId
-    ? `https://t.me/s/${channelName}?before=${beforeId}`
-    : `https://t.me/s/${channelName}`;
-
+  const url = beforeId ? `https://t.me/s/${channelName}?before=${beforeId}` : `https://t.me/s/${channelName}`;
   try {
     await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
-    await new Promise((r) => setTimeout(r, 1500));
-  } catch (err) {
-    console.warn(`   ⚠️ Timeout sur ${url}`);
-    return { products: [], oldestId: null };
-  }
+    await new Promise(r => setTimeout(r, 2000));
+    return await page.evaluate(() => {
+      const messages = document.querySelectorAll(".tgme_widget_message");
+      const products = [];
+      let oldestId = null;
 
-  return await page.evaluate(() => {
-    const messages = document.querySelectorAll(".tgme_widget_message");
-    const products = [];
-    let oldestId = null;
-
-    messages.forEach((msg) => {
-      // Récupérer l'ID du message pour la pagination
-      const msgLink = msg.querySelector(".tgme_widget_message_date");
-      if (msgLink) {
-        const href = msgLink.getAttribute("href") || "";
-        const match = href.match(/\/(\d+)$/);
-        if (match) {
-          const id = parseInt(match[1]);
-          if (oldestId === null || id < oldestId) oldestId = id;
+      messages.forEach(msg => {
+        const msgLink = msg.querySelector(".tgme_widget_message_date");
+        if (msgLink) {
+          const id = parseInt(msgLink.getAttribute("href")?.split('/').pop());
+          if (!oldestId || id < oldestId) oldestId = id;
         }
-      }
 
-      const linkEl = msg.querySelector('a[href*="c.onlyaff.app"]');
-      if (!linkEl) return;
+        const linkEl = msg.querySelector('a[href*="c.onlyaff.app"]');
+        if (!linkEl) return;
 
-      const link = linkEl.href;
+        const imgEl = msg.querySelector(".tgme_widget_message_photo_wrap") || msg.querySelector('a[style*="background-image"]');
+        let image = imgEl?.getAttribute("style")?.match(/url\(['"]?([^'"]+)['"]?\)/)?.[1] || null;
 
-      // Image
-      const imgEl =
-        msg.querySelector(".tgme_widget_message_photo_wrap") ||
-        msg.querySelector('a[style*="background-image"]');
-      let image = null;
-      if (imgEl) {
-        const style = imgEl.getAttribute("style") || "";
-        const match = style.match(/url\(['"]?(https?[^'")\s]+)['"]?\)/);
-        if (match) image = match[1];
-      }
-
-      // Texte
-      const textEl = msg.querySelector(".tgme_widget_message_text");
-      const fullText = textEl ? textEl.innerText.trim() : "";
-      const lines = fullText.split("\n").map((l) => l.trim()).filter(Boolean);
-      const title = lines[0] || "Produit tendance";
-      const priceLine = lines.find((l) => l.includes("€") || l.includes("$"));
-      const price = priceLine || "Prix inconnu";
-      const desc = lines
-        .slice(1)
-        .filter((l) => l !== price && !l.includes("c.onlyaff.app"))
-        .join(" • ");
-
-      // Date
-      const dateEl = msg.querySelector("time");
-      const date = dateEl ? dateEl.getAttribute("datetime") : null;
-
-      products.push({ title, price, description: desc, image, link, date });
+        const textEl = msg.querySelector(".tgme_widget_message_text");
+        const lines = textEl ? textEl.innerText.split("\n").map(l => l.trim()).filter(Boolean) : [];
+        
+        products.push({
+          title: lines[0] || "Produit",
+          price: lines.find(l => l.includes("€") || l.includes("$")) || "Prix voir site",
+          description: lines.slice(1, 4).join(" • "),
+          image,
+          link: linkEl.href,
+          date: msg.querySelector("time")?.getAttribute("datetime")
+        });
+      });
+      return { products, oldestId };
     });
-
-    return { products, oldestId };
-  });
+  } catch { return { products: [], oldestId: null }; }
 }
 
-// ─────────────────────────────────────────────
-// SCRAPING COMPLET D'UN CANAL (toutes les pages)
-// ─────────────────────────────────────────────
-async function scrapeFullChannel(channelName) {
-  let browser;
-  const allProducts = [];
-  const seenLinks = new Set();
+async function scrapeAllChannels() {
+  const browser = await puppeteer.launch({ headless: "new", args: ["--no-sandbox"] });
+  const page = await browser.newPage();
+  let allFound = [];
 
-  try {
-    browser = await puppeteer.launch({
-      headless: "new",
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    });
-    const page = await browser.newPage();
+  const maxPages = INITIAL_SCAN ? 15 : 3; // Scan profond seulement au début
 
-    console.log(`   📡 Scraping @${channelName} (pagination complète)...`);
-
+  for (const channel of TELEGRAM_CHANNELS) {
+    console.log(`📡 Scan @${channel}...`);
     let beforeId = null;
-    let pageNum = 0;
-    let stopScraping = false;
-
-    while (!stopScraping && pageNum < MAX_PAGES_PER_CHAN) {
-      pageNum++;
-      const { products, oldestId } = await scrapePage(page, channelName, beforeId);
-
-      if (!products || products.length === 0) {
-        console.log(`   ✅ @${channelName} — fin de l'historique (page ${pageNum})`);
-        break;
-      }
-
-      let newCount = 0;
-      for (const p of products) {
-        if (!seenLinks.has(p.link)) {
-          seenLinks.add(p.link);
-          allProducts.push(p);
-          newCount++;
-        }
-      }
-
-      console.log(`   📄 Page ${pageNum} — ${newCount} produits | total: ${allProducts.length}`);
-
-      // Arrêter si on est arrivé avant 2024
-      if (products.some((p) => p.date && new Date(p.date) < new Date("2024-01-01"))) {
-        console.log(`   🛑 @${channelName} — messages antérieurs à 2024 détectés, arrêt`);
-        stopScraping = true;
-      }
-
-      if (!oldestId) {
-        console.log(`   ✅ @${channelName} — plus d'ID trouvé, fin`);
-        break;
-      }
-
+    for (let i = 0; i < maxPages; i++) {
+      const { products, oldestId } = await scrapePage(page, channel, beforeId);
+      if (!products.length || !oldestId) break;
+      allFound.push(...products);
       beforeId = oldestId;
-      await new Promise((r) => setTimeout(r, 1000)); // pause entre pages
     }
-
-  } catch (err) {
-    console.error(`❌ Erreur scraping @${channelName} :`, err.message);
-  } finally {
-    if (browser) await browser.close();
   }
-
-  return allProducts;
+  await browser.close();
+  INITIAL_SCAN = false;
+  return allFound;
 }
 
 // ─────────────────────────────────────────────
-// ENVOI DISCORD
-// ─────────────────────────────────────────────
-async function sendToDiscord(product) {
-  try {
-    const payload = {
-      embeds: [{
-        title: product.title.slice(0, 256),
-        url: product.link,
-        description:
-          (product.description ? `*${product.description.slice(0, 300)}*\n\n` : "") +
-          `💰 **${product.price}**\n🔗 [Voir le produit](${product.link})`,
-        color: 0x00bfff,
-        footer: { text: "Hacoo Deal 🛍️" },
-        timestamp: product.date ? new Date(product.date).toISOString() : new Date().toISOString(),
-      }],
-    };
-
-    if (product.image) payload.embeds[0].image = { url: product.image };
-
-    await axios.post(WEBHOOK_URL, payload);
-    console.log(`✅ Envoyé : ${product.title} — ${product.price}`);
-    return true;
-  } catch (err) {
-    console.error("❌ Erreur Discord :", err.response?.data || err.message);
-    return false;
-  }
-}
-
-// ─────────────────────────────────────────────
-// BOUCLE PRINCIPALE
+// LOGIQUE PRINCIPALE
 // ─────────────────────────────────────────────
 async function main() {
-  console.log("\n══════════════════════════════════════");
+  console.log("\n--- DEBUT DU CYCLE ---");
   const sentLinks = await loadSentLinks();
   let queue = loadQueue();
 
-  // ── Scraping si queue vide ──
-  if (queue.length === 0) {
-    console.log("🔎 Queue vide — scraping complet de tous les canaux...");
+  // 1. Récupérer les nouveautés
+  const newItems = await scrapeAllChannels();
+  
+  // 2. Filtrer les doublons (déjà envoyés ou déjà en queue)
+  const uniqueNewItems = newItems.filter(item => 
+    !sentLinks.has(item.link) && !queue.some(q => q.link === item.link)
+  );
 
-    let allProducts = [];
-
-    for (const channel of TELEGRAM_CHANNELS) {
-      const products = await scrapeFullChannel(channel);
-      console.log(`   → @${channel} : ${products.length} produits au total`);
-      allProducts.push(...products);
-    }
-
-    // Filtrer les liens déjà envoyés
-    const seenInQueue = new Set();
-    const newProducts = allProducts.filter((p) => {
-      if (sentLinks.has(p.link) || seenInQueue.has(p.link)) return false;
-      seenInQueue.add(p.link);
-      return true;
-    });
-
-    // ★ MÉLANGER tous les produits de tous les canaux ensemble
-    shuffle(newProducts);
-
-    queue = newProducts;
-    saveQueue(queue);
-    console.log(`\n📬 ${queue.length} nouveaux produits mélangés en file d'attente`);
-
-    if (queue.length === 0) {
-      console.log("✅ Rien de nouveau à envoyer.");
-      return;
-    }
+  if (uniqueNewItems.length > 0) {
+    console.log(`✨ ${uniqueNewItems.length} nouveaux produits ajoutés.`);
+    queue.push(...uniqueNewItems);
   }
 
-  // ── Envoi du batch de 5 ──
-  const batch = queue.splice(0, BATCH_SIZE);
-  console.log(`\n📤 Envoi de ${batch.length} produits — ${queue.length} restants...`);
+  // 3. MELANGE ALEATOIRE de toute la file
+  queue = shuffle(queue);
 
-  for (const product of batch) {
-    const success = await sendToDiscord(product);
-    if (success) sentLinks.add(product.link);
-    await new Promise((r) => setTimeout(r, 1500)); // anti-rate-limit Discord
+  // 4. ENVOI DU BATCH
+  const toSend = queue.splice(0, BATCH_SIZE);
+  console.log(`📤 Envoi de ${toSend.length} produits. (Reste en file: ${queue.length})`);
+
+  for (const product of toSend) {
+    try {
+      await axios.post(WEBHOOK_URL, {
+        embeds: [{
+          title: product.title,
+          url: product.link,
+          description: `💰 **${product.price}**\n\n${product.description}`,
+          image: product.image ? { url: product.image } : null,
+          color: 0x00ff00,
+          footer: { text: "Mix Aléatoire" },
+          timestamp: product.date ? new Date(product.date).toISOString() : new Date().toISOString()
+        }]
+      });
+      sentLinks.add(product.link);
+      console.log(`✅ Envoyé: ${product.title}`);
+    } catch (e) { console.error("❌ Erreur Discord"); }
+    await new Promise(r => setTimeout(r, 2000));
   }
 
+  // Sauvegarde
   saveQueue(queue);
   await saveSentLinks(sentLinks);
-
-  if (queue.length > 0) {
-    console.log(`⏳ ${queue.length} produits restants — prochain envoi dans 3 minutes...`);
-  } else {
-    console.log("✅ File terminée ! Prochain scan dans 3 minutes pour les nouvelles annonces.");
-  }
+  console.log("--- FIN DU CYCLE (Prochain dans 5min) ---");
 }
 
-// Lancement immédiat + toutes les 3 minutes
+// Lancement
 main();
 setInterval(main, INTERVAL_MS);
