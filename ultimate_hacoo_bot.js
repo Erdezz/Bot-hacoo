@@ -5,8 +5,7 @@ const WEBHOOK_URL = "https://discord.com/api/webhooks/1484555324810723398/5C_TiG
 
 // 👉 Mets ici tes sources (très important)
 const SOURCES = [
-  "https://c.onlyaff.app/7oBvx1",
-  "https://example2.com"
+  "https://t.me/s/hacoolinksydeuxx"
 ];
 
 let sentLinks = new Set();
