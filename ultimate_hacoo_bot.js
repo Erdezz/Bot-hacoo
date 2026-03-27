@@ -14,22 +14,19 @@ async function getLinksFromTelegram() {
   });
   const page = await browser.newPage();
   await page.goto(TELEGRAM_CHANNEL, { waitUntil: "networkidle2" });
-
   await new Promise(r => setTimeout(r, 3000));
 
   const links = await page.evaluate(() => {
-    const urls = [];
-    document.querySelectorAll("a").forEach(a => {
-      if (a.href.includes("c.onlyaff.app")) urls.push(a.href);
-    });
-    return urls;
+    return Array.from(document.querySelectorAll("a"))
+      .map(a => a.href)
+      .filter(h => h.includes("c.onlyaff.app"));
   });
 
   await browser.close();
   return [...new Set(links)];
 }
 
-// Scraper le produit depuis Hacoo
+// Scraper produit complet
 async function scrapeProduct(url) {
   const browser = await puppeteer.launch({
     headless: "new",
@@ -38,27 +35,43 @@ async function scrapeProduct(url) {
   const page = await browser.newPage();
 
   try {
-    await page.goto(url, { waitUntil: "networkidle0", timeout: 45000 });
-    // attendre que le produit soit chargé
-    await page.waitForSelector("img", { timeout: 15000 });
+    await page.goto(url, { waitUntil: "networkidle0", timeout: 60000 });
+    // attendre que le contenu principal charge
+    await page.waitForTimeout(4000);
 
     const data = await page.evaluate(() => {
-      // Sélecteurs typiques Hacoo (à ajuster si le site change)
+      // Titre produit
       const titleEl = document.querySelector("h1") || document.querySelector(".product-title");
-      const priceEl = document.querySelector(".product-price") || document.querySelector("span.price");
-      const imgEl = document.querySelector("img") || document.querySelector(".product-image img");
-      const descEl = document.querySelector(".product-description") || document.querySelector("p");
+      const title = titleEl ? titleEl.innerText.trim() : "Produit tendance";
 
-      return {
-        title: titleEl ? titleEl.innerText.trim() : "Produit tendance",
-        price: priceEl ? priceEl.innerText.trim() : "Prix inconnu",
-        image: imgEl ? imgEl.src : null,
-        description: descEl ? descEl.innerText.trim() : ""
-      };
+      // Prix produit
+      const priceEl = document.querySelector(".product-price") || document.querySelector("span.price");
+      const price = priceEl ? priceEl.innerText.trim() : "Prix inconnu";
+
+      // Image principale (peut être dans un slider ou background)
+      let img = null;
+      const imgEl = document.querySelector(".product-image img") || document.querySelector("img");
+      if (imgEl) img = imgEl.src;
+      else {
+        // parfois image dans style background-image
+        const bgEl = document.querySelector(".product-image");
+        if (bgEl) {
+          const bg = window.getComputedStyle(bgEl).getPropertyValue("background-image");
+          const urlMatch = bg.match(/url\("?(.*?)"?\)/);
+          if (urlMatch) img = urlMatch[1];
+        }
+      }
+
+      // Description
+      const descEl = document.querySelector(".product-description") || document.querySelector("p");
+      const description = descEl ? descEl.innerText.trim() : "";
+
+      return { title, price, image: img, description };
     });
 
     await page.close();
     return data;
+
   } catch (err) {
     console.log("Erreur scraping:", url, err.message);
     await page.close();
@@ -66,16 +79,13 @@ async function scrapeProduct(url) {
   }
 }
 
-// Envoi sur Discord avec image en grand et embed
+// Envoyer sur Discord
 async function sendToDiscord(product, link) {
   if (!product || !product.image) return;
 
   try {
     await axios.post(WEBHOOK_URL, {
-      content: `**${product.title}**
-${product.price}
-🔗 ${link}
-${product.description}`,
+      content: `**${product.title}**\n${product.price}\n🔗 ${link}\n${product.description}`,
       embeds: [
         {
           title: product.title,
@@ -97,21 +107,20 @@ async function main() {
   console.log("🔎 Recherche de produits sur Telegram...");
   const links = await getLinksFromTelegram();
 
-  for (let link of links) {
+  for (const link of links) {
     if (sentLinks.has(link)) continue;
 
     console.log("🛍️ Nouveau produit :", link);
     const product = await scrapeProduct(link);
+
     if (product) {
       await sendToDiscord(product, link);
       sentLinks.add(link);
-      await new Promise(r => setTimeout(r, 5000)); // pause anti-ban
+      await new Promise(r => setTimeout(r, 5000));
     }
   }
 }
 
 // Boucle toutes les 5 minutes
 setInterval(main, 5 * 60 * 1000);
-
-// Lancement immédiat
 main();
