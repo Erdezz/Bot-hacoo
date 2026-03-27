@@ -5,7 +5,7 @@ const WEBHOOK_URL = process.env.WEBHOOK_URL || "https://discord.com/api/webhooks
 const TELEGRAM_CHANNEL = "https://t.me/s/hacoolinksydeuxx";
 let sentLinks = new Set();
 
-async function getLinksFromTelegram() {
+async function getProductsFromTelegram() {
   const browser = await puppeteer.launch({
     headless: "new",
     args: ["--no-sandbox", "--disable-setuid-sandbox"]
@@ -13,103 +13,75 @@ async function getLinksFromTelegram() {
   const page = await browser.newPage();
   await page.goto(TELEGRAM_CHANNEL, { waitUntil: "networkidle2" });
   await new Promise(r => setTimeout(r, 3000));
-  const links = await page.evaluate(() => {
-    return Array.from(document.querySelectorAll("a"))
-      .map(a => a.href)
-      .filter(h => h.includes("c.onlyaff.app"));
-  });
-  await browser.close();
-  return [...new Set(links)];
-}
 
-async function scrapeProduct(url) {
-  const browser = await puppeteer.launch({
-    headless: "new",
-    args: ["--no-sandbox", "--disable-setuid-sandbox"]
-  });
-  const page = await browser.newPage();
+  const products = await page.evaluate(() => {
+    const messages = document.querySelectorAll(".tgme_widget_message");
+    const results = [];
 
-  try {
-    // Intercepter les redirections pour avoir l'URL finale
-    await page.setRequestInterception(false);
+    messages.forEach(msg => {
+      // Récupérer le lien c.onlyaff.app
+      const linkEl = msg.querySelector('a[href*="c.onlyaff.app"]');
+      if (!linkEl) return;
+      const link = linkEl.href;
 
-    // Attendre que la page soit complètement chargée après redirections
-    await page.goto(url, { waitUntil: "networkidle0", timeout: 60000 });
-    await new Promise(r => setTimeout(r, 5000)); // attendre le JS dynamique
-
-    const finalUrl = page.url();
-    console.log("URL finale :", finalUrl);
-
-    const data = await page.evaluate(() => {
-      // Hacoo - sélecteurs spécifiques
-      const titleEl =
-        document.querySelector(".goods-name") ||
-        document.querySelector(".product-name") ||
-        document.querySelector('[class*="title"]') ||
-        document.querySelector("h1");
-
-      const priceEl =
-        document.querySelector(".goods-price") ||
-        document.querySelector('[class*="price"]') ||
-        document.querySelector(".price");
-
-      // Image principale du produit
+      // Récupérer l'image (photo du message Telegram)
       const imgEl =
-        document.querySelector(".goods-img img") ||
-        document.querySelector(".swiper-slide img") ||
-        document.querySelector('[class*="product"] img') ||
-        document.querySelector("img");
+        msg.querySelector(".tgme_widget_message_photo_wrap") ||
+        msg.querySelector('a[style*="background-image"]');
 
-      const descEl =
-        document.querySelector(".goods-desc") ||
-        document.querySelector('[class*="desc"]') ||
-        document.querySelector(".detail");
+      let image = null;
+      if (imgEl) {
+        const style = imgEl.getAttribute("style") || "";
+        const match = style.match(/url\(['"]?(https?[^'")\s]+)['"]?\)/);
+        if (match) image = match[1];
+      }
 
-      return {
-        title: titleEl ? titleEl.innerText.trim() : null,
-        price: priceEl ? priceEl.innerText.trim() : null,
-        image: imgEl ? imgEl.src : null,
-        description: descEl ? descEl.innerText.trim().slice(0, 200) : "",
-        url: window.location.href
-      };
+      // Récupérer le texte du message (titre + prix)
+      const textEl = msg.querySelector(".tgme_widget_message_text");
+      const fullText = textEl ? textEl.innerText.trim() : "";
+
+      // Parser le texte
+      const lines = fullText.split("\n").map(l => l.trim()).filter(Boolean);
+      const title = lines[0] || "Produit tendance";
+
+      // Chercher le prix (ligne avec €)
+      const priceLine = lines.find(l => l.includes("€") || l.includes("$"));
+      const price = priceLine || "Prix inconnu";
+
+      // Description = lignes entre titre et prix
+      const desc = lines.slice(1).filter(l => l !== price && !l.includes("c.onlyaff.app")).join(" • ");
+
+      results.push({ title, price, description: desc, image, link });
     });
 
-    await browser.close();
-    return data;
+    return results;
+  });
 
-  } catch (err) {
-    console.log("Erreur scraping:", url, err.message);
-    await browser.close();
-    return null;
-  }
+  await browser.close();
+  return products;
 }
 
-async function sendToDiscord(product, link) {
+async function sendToDiscord(product) {
   try {
-    const title = product.title || "Produit tendance";
-    const price = product.price || "Prix inconnu";
-    const image = product.image;
-
     const payload = {
       embeds: [
         {
-          title: title,
-          url: product.url || link,
-          description: `💰 **Prix :** ${price}\n\n${product.description || ""}`,
-          color: 0x00ff99,
+          title: product.title,
+          url: product.link,
+          description: `${product.description ? `*${product.description}*\n\n` : ""}💰 **${product.price}**\n🔗 [Voir le produit](${product.link})`,
+          color: 0x00bfff,
           footer: { text: "Hacoo Deal 🛍️" },
           timestamp: new Date().toISOString()
         }
       ]
     };
 
-    // Ajouter l'image seulement si elle existe
-    if (image && image.startsWith("http")) {
-      payload.embeds[0].image = { url: image };
+    if (product.image) {
+      payload.embeds[0].image = { url: product.image };
     }
 
     await axios.post(WEBHOOK_URL, payload);
-    console.log("✅ Envoyé :", title, "-", price);
+    console.log("✅ Envoyé :", product.title, "-", product.price);
 
   } catch (err) {
     console.log("Erreur Discord :", err.response?.data || err.message);
@@ -117,22 +89,17 @@ async function sendToDiscord(product, link) {
 }
 
 async function main() {
-  console.log("🔎 Recherche de produits sur Telegram...");
-  const links = await getLinksFromTelegram();
-  console.log(`📦 ${links.length} liens trouvés`);
+  console.log("🔎 Scan Telegram...");
+  const products = await getProductsFromTelegram();
+  console.log(`📦 ${products.length} produits trouvés`);
 
-  for (const link of links) {
-    if (sentLinks.has(link)) continue;
-    console.log("🛍️ Nouveau produit :", link);
-    const product = await scrapeProduct(link);
+  for (const product of products) {
+    if (sentLinks.has(product.link)) continue;
 
-    if (product && product.title) {
-      await sendToDiscord(product, link);
-      sentLinks.add(link);
-      await new Promise(r => setTimeout(r, 5000));
-    } else {
-      console.log("⚠️ Produit vide, ignoré :", link);
-    }
+    console.log("🛍️", product.title, "-", product.price);
+    await sendToDiscord(product);
+    sentLinks.add(product.link);
+    await new Promise(r => setTimeout(r, 3000));
   }
 }
 
