@@ -2,6 +2,7 @@ const puppeteer = require("puppeteer");
 const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
+const FormData = require("form-data");
 
 // ─────────────────────────────────────────────
 // CONFIGURATION
@@ -179,6 +180,21 @@ async function sendToDiscord(product) {
 // ─────────────────────────────────────────────
 // ENVOI TELEGRAM
 // ─────────────────────────────────────────────
+
+// Télécharge une image en mémoire (Buffer) depuis une URL
+async function downloadImageBuffer(url) {
+  const response = await axios.get(url, {
+    responseType: "arraybuffer",
+    timeout: 15000,
+    headers: {
+      // Simuler un navigateur pour éviter les blocages
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
+      "Referer": "https://t.me/",
+    },
+  });
+  return Buffer.from(response.data);
+}
+
 async function sendToTelegram(product) {
   const caption =
     `🛍️ *${escapeMarkdown(product.title)}*\n` +
@@ -189,22 +205,37 @@ async function sendToTelegram(product) {
   const baseUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
   if (product.image) {
-    // Envoi avec photo
-    await axios.post(`${baseUrl}/sendPhoto`, {
-      chat_id: TELEGRAM_CHAT_ID,
-      photo: product.image,
-      caption,
-      parse_mode: "MarkdownV2",
-    });
-  } else {
-    // Envoi texte seul
-    await axios.post(`${baseUrl}/sendMessage`, {
-      chat_id: TELEGRAM_CHAT_ID,
-      text: caption,
-      parse_mode: "MarkdownV2",
-      disable_web_page_preview: false,
-    });
+    try {
+      // Téléchargement de l'image en mémoire
+      const imageBuffer = await downloadImageBuffer(product.image);
+
+      // Envoi en multipart/form-data (Telegram accepte toujours ça)
+      const form = new FormData();
+      form.append("chat_id", TELEGRAM_CHAT_ID);
+      form.append("caption", caption);
+      form.append("parse_mode", "MarkdownV2");
+      form.append("photo", imageBuffer, {
+        filename: "product.jpg",
+        contentType: "image/jpeg",
+      });
+
+      await axios.post(`${baseUrl}/sendPhoto`, form, {
+        headers: form.getHeaders(),
+        maxBodyLength: Infinity,
+      });
+      return;
+    } catch (imgErr) {
+      console.warn(`⚠️ Image non téléchargeable, envoi sans image: ${imgErr.message}`);
+    }
   }
+
+  // Fallback : texte seul (si pas d'image ou échec du téléchargement)
+  await axios.post(`${baseUrl}/sendMessage`, {
+    chat_id: TELEGRAM_CHAT_ID,
+    text: caption,
+    parse_mode: "MarkdownV2",
+    disable_web_page_preview: false,
+  });
 }
 
 // Échappe les caractères spéciaux pour MarkdownV2
