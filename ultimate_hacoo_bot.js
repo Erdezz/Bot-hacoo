@@ -1,16 +1,12 @@
+
 const puppeteer = require("puppeteer");
 const axios = require("axios");
 
-// Ton webhook Discord (ou via variable d'environnement Railway)
 const WEBHOOK_URL = process.env.WEBHOOK_URL || "https://discord.com/api/webhooks/1484555324810723398/5C_TiGKAdL0HlR6bfHOHPRyhVANsTuxvAplD0F3yDps8HTm-qd358cVP7tR5dCabOVIN";
-
-// Canal Telegram public à scraper
 const TELEGRAM_CHANNEL = "https://t.me/s/hacoolinksydeuxx";
 
-// Mémoire des liens déjà envoyés
 let sentLinks = new Set();
 
-// Récupérer tous les liens c.onlyaff.app depuis Telegram
 async function getLinksFromTelegram() {
   const browser = await puppeteer.launch({
     headless: "new",
@@ -19,8 +15,6 @@ async function getLinksFromTelegram() {
 
   const page = await browser.newPage();
   await page.goto(TELEGRAM_CHANNEL, { waitUntil: "networkidle2" });
-
-  // Petit délai pour que la page charge correctement
   await new Promise(r => setTimeout(r, 3000));
 
   const links = await page.evaluate(() => {
@@ -32,10 +26,9 @@ async function getLinksFromTelegram() {
   });
 
   await browser.close();
-  return [...new Set(links)]; // retire les doublons
+  return [...new Set(links)];
 }
 
-// Scraper le produit pour récupérer titre, prix et image
 async function scrapeProduct(url) {
   const browser = await puppeteer.launch({
     headless: "new",
@@ -45,8 +38,6 @@ async function scrapeProduct(url) {
   const page = await browser.newPage();
   try {
     await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
-
-    // Petit délai pour charger les images et le texte
     await new Promise(r => setTimeout(r, 3000));
 
     const data = await page.evaluate(() => {
@@ -69,7 +60,7 @@ async function scrapeProduct(url) {
   }
 }
 
-// Envoyer le produit sur Discord via webhook
+// Nouvelle version sans hashtags et embed amélioré
 async function sendToDiscord(product, link) {
   if (!product || !product.image) return;
 
@@ -77,26 +68,26 @@ async function sendToDiscord(product, link) {
     await axios.post(WEBHOOK_URL, {
       content: `✨ **${product.title}**
 💸 ${product.price}
-🔗 ${link}
-
-#hacoo #fashion #streetwear`,
+🔗 ${link}`,
       embeds: [
         {
+          title: product.title,
+          description: product.price,
+          url: link,
           image: { url: product.image },
           color: 0x00ff99
         }
       ]
     });
+
     console.log("✅ Envoyé :", product.title);
   } catch (err) {
     console.log("Erreur Discord :", err.message);
   }
 }
 
-// Fonction principale : récupère les liens, scrape et envoie
 async function main() {
   console.log("🔎 Recherche de produits sur Telegram...");
-
   const links = await getLinksFromTelegram();
 
   for (let link of links) {
@@ -107,8 +98,6 @@ async function main() {
     if (product) {
       await sendToDiscord(product, link);
       sentLinks.add(link);
-
-      // Pause de 5 secondes entre chaque envoi pour éviter les restrictions
       await new Promise(r => setTimeout(r, 5000));
     }
   }
