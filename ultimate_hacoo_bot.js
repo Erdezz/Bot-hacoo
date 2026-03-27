@@ -1,17 +1,32 @@
 const puppeteer = require("puppeteer");
 const axios = require("axios");
+const fs = require("fs");
 
 const WEBHOOK_URL = process.env.WEBHOOK_URL || "https://discord.com/api/webhooks/1484555324810723398/5C_TiGKAdL0HlR6bfHOHPRyhVANsTuxvAplD0F3yDps8HTm-qd358cVP7tR5dCabOVIN";
-const TELEGRAM_CHANNEL = "https://t.me/s/hacoolinksydeuxx";
-let sentLinks = new Set();
+const SENT_FILE = "sent_links.json";
 
-async function getProductsFromTelegram() {
+// ✅ Deux canaux Telegram
+const TELEGRAM_CHANNELS = [
+  "https://t.me/s/hacoolinksydeuxx",
+  "https://t.me/s/mkfashionfinds" // ← remplace ici
+];
+
+// Charger les liens déjà envoyés (persistant après redémarrage)
+let sentLinks = new Set(
+  fs.existsSync(SENT_FILE) ? JSON.parse(fs.readFileSync(SENT_FILE)) : []
+);
+
+function saveSentLinks() {
+  fs.writeFileSync(SENT_FILE, JSON.stringify([...sentLinks]));
+}
+
+async function getProductsFromTelegram(channelUrl) {
   const browser = await puppeteer.launch({
     headless: "new",
     args: ["--no-sandbox", "--disable-setuid-sandbox"]
   });
   const page = await browser.newPage();
-  await page.goto(TELEGRAM_CHANNEL, { waitUntil: "networkidle2" });
+  await page.goto(channelUrl, { waitUntil: "networkidle2" });
   await new Promise(r => setTimeout(r, 3000));
 
   const products = await page.evaluate(() => {
@@ -19,12 +34,10 @@ async function getProductsFromTelegram() {
     const results = [];
 
     messages.forEach(msg => {
-      // Récupérer le lien c.onlyaff.app
       const linkEl = msg.querySelector('a[href*="c.onlyaff.app"]');
       if (!linkEl) return;
       const link = linkEl.href;
 
-      // Récupérer l'image (photo du message Telegram)
       const imgEl =
         msg.querySelector(".tgme_widget_message_photo_wrap") ||
         msg.querySelector('a[style*="background-image"]');
@@ -36,19 +49,12 @@ async function getProductsFromTelegram() {
         if (match) image = match[1];
       }
 
-      // Récupérer le texte du message (titre + prix)
       const textEl = msg.querySelector(".tgme_widget_message_text");
       const fullText = textEl ? textEl.innerText.trim() : "";
-
-      // Parser le texte
       const lines = fullText.split("\n").map(l => l.trim()).filter(Boolean);
       const title = lines[0] || "Produit tendance";
-
-      // Chercher le prix (ligne avec €)
       const priceLine = lines.find(l => l.includes("€") || l.includes("$"));
       const price = priceLine || "Prix inconnu";
-
-      // Description = lignes entre titre et prix
       const desc = lines.slice(1).filter(l => l !== price && !l.includes("c.onlyaff.app")).join(" • ");
 
       results.push({ title, price, description: desc, image, link });
@@ -89,19 +95,33 @@ async function sendToDiscord(product) {
 }
 
 async function main() {
-  console.log("🔎 Scan Telegram...");
-  const products = await getProductsFromTelegram();
-  console.log(`📦 ${products.length} produits trouvés`);
+  console.log("🔎 Scan des canaux Telegram...");
 
-  for (const product of products) {
-    if (sentLinks.has(product.link)) continue;
+  // Récupérer produits des 2 canaux
+  let allProducts = [];
+  for (const channel of TELEGRAM_CHANNELS) {
+    const products = await getProductsFromTelegram(channel);
+    console.log(`📦 ${products.length} produits trouvés sur ${channel}`);
+    allProducts.push(...products);
+  }
 
-    console.log("🛍️", product.title, "-", product.price);
+  // Filtrer ceux pas encore envoyés
+  const newProducts = allProducts.filter(p => !sentLinks.has(p.link));
+  console.log(`🆕 ${newProducts.length} nouveaux produits à envoyer`);
+
+  // ✅ Envoyer seulement 3 par cycle
+  const toSend = newProducts.slice(0, 3);
+
+  for (const product of toSend) {
     await sendToDiscord(product);
     sentLinks.add(product.link);
-    await new Promise(r => setTimeout(r, 3000));
+    saveSentLinks(); // sauvegarder après chaque envoi
+    await new Promise(r => setTimeout(r, 2000)); // pause entre chaque envoi
   }
+
+  console.log(`⏳ Prochain scan dans 2 minutes...`);
 }
 
-setInterval(main, 5 * 60 * 1000);
+// ✅ Toutes les 2 minutes
+setInterval(main, 2 * 60 * 1000);
 main();
