@@ -14,8 +14,7 @@ async function getLinksFromTelegram() {
   });
   const page = await browser.newPage();
   await page.goto(TELEGRAM_CHANNEL, { waitUntil: "networkidle2" });
-  
-  // remplacer waitForTimeout par Promise
+
   await new Promise(r => setTimeout(r, 3000));
 
   const links = await page.evaluate(() => {
@@ -28,7 +27,7 @@ async function getLinksFromTelegram() {
   return [...new Set(links)];
 }
 
-// Scraper le produit complet
+// Scraper produit complet en utilisant le JSON intégré
 async function scrapeProduct(url) {
   const browser = await puppeteer.launch({
     headless: "new",
@@ -38,37 +37,26 @@ async function scrapeProduct(url) {
 
   try {
     await page.goto(url, { waitUntil: "networkidle0", timeout: 60000 });
-    // remplacer waitForTimeout
-    await new Promise(r => setTimeout(r, 4000));
 
+    // Attente pour que les données du produit soient chargées
+    await page.waitForTimeout(4000);
+
+    // Récupérer l'objet JSON des produits (souvent dans __INITIAL_STATE__)
     const data = await page.evaluate(() => {
-      const titleEl = document.querySelector("h1") || document.querySelector(".product-title");
-      const priceEl = document.querySelector(".product-price") || document.querySelector("span.price");
-      const imgEl = document.querySelector(".product-image img") || document.querySelector("img");
-      let img = imgEl ? imgEl.src : null;
-
-      if (!img) {
-        const bgEl = document.querySelector(".product-image");
-        if (bgEl) {
-          const bg = window.getComputedStyle(bgEl).getPropertyValue("background-image");
-          const urlMatch = bg.match(/url\("?(.*?)"?\)/);
-          if (urlMatch) img = urlMatch[1];
-        }
+      const productData = window.__INITIAL_STATE__; // C'est généralement là que Hacoo charge les données produit
+      if (productData && productData.product) {
+        return {
+          title: productData.product.title || "Produit tendance",
+          price: productData.product.price || "Prix inconnu",
+          image: productData.product.imageUrl || null,
+          description: productData.product.description || ""
+        };
       }
-
-      const descEl = document.querySelector(".product-description") || document.querySelector("p");
-
-      return {
-        title: titleEl ? titleEl.innerText.trim() : "Produit tendance",
-        price: priceEl ? priceEl.innerText.trim() : "Prix inconnu",
-        image: img,
-        description: descEl ? descEl.innerText.trim() : ""
-      };
+      return null;
     });
 
     await page.close();
     return data;
-
   } catch (err) {
     console.log("Erreur scraping:", url, err.message);
     await page.close();
@@ -113,7 +101,7 @@ async function main() {
     if (product) {
       await sendToDiscord(product, link);
       sentLinks.add(link);
-      await new Promise(r => setTimeout(r, 5000));
+      await new Promise(r => setTimeout(r, 5000)); // pause anti-ban
     }
   }
 }
