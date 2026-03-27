@@ -1,7 +1,7 @@
 const puppeteer = require("puppeteer");
 const axios = require("axios");
 
-const WEBHOOK_URL = process.env."https://discord.com/api/webhooks/1484555324810723398/5C_TiGKAdL0HlR6bfHOHPRyhVANsTuxvAplD0F3yDps8HTm-qd358cVP7tR5dCabOVIN";
+const WEBHOOK_URL = process.env.WEBHOOK_URL;"https://discord.com/api/webhooks/1484555324810723398/5C_TiGKAdL0HlR6bfHOHPRyhVANsTuxvAplD0F3yDps8HTm-qd358cVP7tR5dCabOVIN";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GIST_ID = process.env.GIST_ID;
 const TELEGRAM_BOT_TOKEN = process.env.8623248061:AAH6rBf57jJNftcIOkmp2WruA67zCyC3Zj8;
