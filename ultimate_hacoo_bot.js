@@ -1,4 +1,3 @@
-
 const puppeteer = require("puppeteer");
 const axios = require("axios");
 
@@ -7,6 +6,7 @@ const TELEGRAM_CHANNEL = "https://t.me/s/hacoolinksydeuxx";
 
 let sentLinks = new Set();
 
+// Récupérer tous les liens c.onlyaff.app depuis Telegram
 async function getLinksFromTelegram() {
   const browser = await puppeteer.launch({
     headless: "new",
@@ -29,6 +29,7 @@ async function getLinksFromTelegram() {
   return [...new Set(links)];
 }
 
+// Scraper le produit en ouvrant le lien complet
 async function scrapeProduct(url) {
   const browser = await puppeteer.launch({
     headless: "new",
@@ -38,16 +39,23 @@ async function scrapeProduct(url) {
   const page = await browser.newPage();
   try {
     await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
-    await new Promise(r => setTimeout(r, 3000));
 
+    // attendre que la page charge bien tout
+    await new Promise(r => setTimeout(r, 4000));
+
+    // Extraire toutes les infos du produit
     const data = await page.evaluate(() => {
       const title = document.querySelector("h1")?.innerText || "Produit tendance";
       const priceMatch = document.body.innerText.match(/€\s?\d+([.,]\d+)?/);
-      const image = document.querySelector("img")?.src || null;
+      const images = Array.from(document.querySelectorAll("img")).map(img => img.src);
+      const mainImage = images.length > 0 ? images[0] : null;
+      const description = document.querySelector("p")?.innerText || "";
+
       return {
         title,
         price: priceMatch ? priceMatch[0] : "Prix inconnu",
-        image
+        image: mainImage,
+        description
       };
     });
 
@@ -60,21 +68,22 @@ async function scrapeProduct(url) {
   }
 }
 
-// Nouvelle version sans hashtags et embed amélioré
+// Envoyer les infos sur Discord
 async function sendToDiscord(product, link) {
   if (!product || !product.image) return;
 
   try {
     await axios.post(WEBHOOK_URL, {
-      content: `✨ **${product.title}**
-💸 ${product.price}
-🔗 ${link}`,
+      content: `**${product.title}**
+${product.price}
+🔗 ${link}
+${product.description}`,
       embeds: [
         {
           title: product.title,
-          description: product.price,
+          description: product.description || product.price,
           url: link,
-          image: { url: product.image },
+          image: { url: product.image }, // image principale en grand
           color: 0x00ff99
         }
       ]
@@ -86,6 +95,7 @@ async function sendToDiscord(product, link) {
   }
 }
 
+// Boucle principale
 async function main() {
   console.log("🔎 Recherche de produits sur Telegram...");
   const links = await getLinksFromTelegram();
@@ -98,7 +108,7 @@ async function main() {
     if (product) {
       await sendToDiscord(product, link);
       sentLinks.add(link);
-      await new Promise(r => setTimeout(r, 5000));
+      await new Promise(r => setTimeout(r, 5000)); // anti-ban
     }
   }
 }
