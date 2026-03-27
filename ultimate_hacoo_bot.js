@@ -8,7 +8,6 @@ const TELEGRAM_CHANNELS = [
   "https://t.me/s/hacoolinksydeuxx",
   "https://t.me/s/linkscrewfinds",
   "https://t.me/s/mkfashionfinds",
-  "https://t.me/s/QUATRIEME_CANAL"
 ];
 
 async function loadSentLinks() {
