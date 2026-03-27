@@ -1,175 +1,207 @@
 const puppeteer = require("puppeteer");
 const axios = require("axios");
 
-// ─────────────────────────────────────────────
-// CONFIGURATION
-// ─────────────────────────────────────────────
-const WEBHOOK_URL = "https://discord.com/api/webhooks/1484555324810723398/5C_TiGKAdL0HlR6bfHOHPRyhVANsTuxvAplD0F3yDps8HTm-qd358cVP7tR5dCabOVIN";
+const WEBHOOK_URL = process.env."https://discord.com/api/webhooks/1484555324810723398/5C_TiGKAdL0HlR6bfHOHPRyhVANsTuxvAplD0F3yDps8HTm-qd358cVP7tR5dCabOVIN";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const GIST_ID = process.env.GIST_ID; 
+const GIST_ID = process.env.GIST_ID;
+const TELEGRAM_BOT_TOKEN = process.env.8623248061:AAH6rBf57jJNftcIOkmp2WruA67zCyC3Zj8;
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
 const TELEGRAM_CHANNELS = [
-  "hacoolinksydeuxx",
-  "linkscrewfinds",
-  "mkfashionfinds"
+  "https://t.me/s/hacoolinksydeuxx",
+  "https://t.me/s/linkscrewfinds",
+  "https://t.me/s/mkfashionfinds",
+  "https://t.me/s/QUATRIEME_CANAL"
 ];
 
-const BATCH_SIZE = 5; // Envoi 5 par 5
-const INTERVAL_MS = 5 * 60 * 1000; // Toutes les 5 minutes
-
-// ─────────────────────────────────────────────
-// FONCTIONS UTILITAIRES
-// ─────────────────────────────────────────────
-
-// Mélange un tableau de façon aléatoire
-function shuffle(array) {
-  for (let i = array.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [array[i], array[j]] = [array[j], array[i]];
-  }
-  return array;
-}
-
-async function loadData() {
+async function loadSentLinks() {
   try {
     const res = await axios.get(`https://api.github.com/gists/${GIST_ID}`, {
       headers: { Authorization: `token ${GITHUB_TOKEN}` }
     });
-    return JSON.parse(Object.values(res.data.files)[0].content);
+    const content = Object.values(res.data.files)[0].content;
+    return new Set(JSON.parse(content));
   } catch {
-    return { sent: [], queue: [] };
+    return new Set();
   }
 }
 
-async function saveData(sent, queue) {
+async function saveSentLinks(sentLinks) {
   try {
     await axios.patch(`https://api.github.com/gists/${GIST_ID}`, {
       files: {
-        "data.json": {
-          content: JSON.stringify({ sent, queue })
+        "sent_links.json": {
+          content: JSON.stringify([...sentLinks])
         }
       }
     }, {
       headers: { Authorization: `token ${GITHUB_TOKEN}` }
     });
+    console.log("💾 Liens sauvegardés dans le Gist");
   } catch (err) {
-    console.log("❌ Erreur Gist :", err.message);
+    console.log("Erreur sauvegarde Gist :", err.message);
   }
 }
 
-// ─────────────────────────────────────────────
-// SCRAPING
-// ─────────────────────────────────────────────
-
-async function getProductsFromTelegram(channelName) {
+async function getProductsFromTelegram(channelUrl) {
   const browser = await puppeteer.launch({
     headless: "new",
     args: ["--no-sandbox", "--disable-setuid-sandbox"]
   });
   const page = await browser.newPage();
-  
-  // On utilise l'URL de preview publique de Telegram
-  await page.goto(`https://t.me/s/${channelName}`, { waitUntil: "networkidle2" });
-  await new Promise(r => setTimeout(r, 2000));
 
-  const products = await page.evaluate(() => {
-    const results = [];
-    document.querySelectorAll(".tgme_widget_message").forEach(msg => {
-      const linkEl = msg.querySelector('a[href*="c.onlyaff.app"]');
-      if (!linkEl) return;
+  try {
+    await page.goto(channelUrl, { waitUntil: "networkidle2" });
+    await new Promise(r => setTimeout(r, 3000));
 
-      const imgEl = msg.querySelector(".tgme_widget_message_photo_wrap") || 
-                    msg.querySelector('a[style*="background-image"]');
-      
-      let image = null;
-      if (imgEl) {
-        const style = imgEl.getAttribute("style") || "";
-        const match = style.match(/url\(['"]?(https?[^'")\s]+)['"]?\)/);
-        if (match) image = match[1];
+    // Scroll pour charger un maximum de messages
+    await page.evaluate(async () => {
+      for (let i = 0; i < 10; i++) {
+        window.scrollTo(0, 0);
+        await new Promise(r => setTimeout(r, 1000));
       }
-
-      const textEl = msg.querySelector(".tgme_widget_message_text");
-      const lines = textEl ? textEl.innerText.trim().split("\n") : [];
-      
-      results.push({
-        title: lines[0] || "Produit Hacoo",
-        price: lines.find(l => l.includes("€") || l.includes("$")) || "Voir prix",
-        description: lines.slice(1, 3).join(" ").substring(0, 200),
-        image,
-        link: linkEl.href
-      });
     });
-    return results;
-  });
 
-  await browser.close();
-  return products;
+    await new Promise(r => setTimeout(r, 2000));
+
+    const products = await page.evaluate(() => {
+      const messages = document.querySelectorAll(".tgme_widget_message");
+      const results = [];
+
+      messages.forEach(msg => {
+        const linkEl = msg.querySelector('a[href*="c.onlyaff.app"]');
+        if (!linkEl) return;
+        const link = linkEl.href;
+
+        const imgEl =
+          msg.querySelector(".tgme_widget_message_photo_wrap") ||
+          msg.querySelector('a[style*="background-image"]');
+
+        let image = null;
+        if (imgEl) {
+          const style = imgEl.getAttribute("style") || "";
+          const match = style.match(/url\(['"]?(https?[^'")\s]+)['"]?\)/);
+          if (match) image = match[1];
+        }
+
+        const textEl = msg.querySelector(".tgme_widget_message_text");
+        const fullText = textEl ? textEl.innerText.trim() : "";
+        const lines = fullText.split("\n").map(l => l.trim()).filter(Boolean);
+        const title = lines[0] || "Produit tendance";
+        const priceLine = lines.find(l => l.includes("€") || l.includes("$"));
+        const price = priceLine || "Prix inconnu";
+        const desc = lines
+          .slice(1)
+          .filter(l => l !== price && !l.includes("c.onlyaff.app"))
+          .join(" • ");
+
+        results.push({ title, price, description: desc, image, link });
+      });
+
+      return results;
+    });
+
+    await browser.close();
+    return products;
+
+  } catch (err) {
+    console.log("Erreur Telegram :", channelUrl, err.message);
+    await browser.close();
+    return [];
+  }
 }
 
-// ─────────────────────────────────────────────
-// EXECUTION PRINCIPALE
-// ─────────────────────────────────────────────
+async function sendToDiscord(product) {
+  try {
+    const payload = {
+      embeds: [{
+        title: product.title,
+        url: product.link,
+        description: `${product.description ? `*${product.description}*\n\n` : ""}💰 **${product.price}**\n🔗 [Voir le produit](${product.link})`,
+        color: 0x00bfff,
+        footer: { text: "Hacoo Deal 🛍️" },
+        timestamp: new Date().toISOString()
+      }]
+    };
+
+    if (product.image) {
+      payload.embeds[0].image = { url: product.image };
+    }
+
+    await axios.post(WEBHOOK_URL, payload);
+    console.log("✅ Discord :", product.title);
+
+  } catch (err) {
+    console.log("Erreur Discord :", err.response?.data || err.message);
+  }
+}
+
+async function sendToTelegram(product) {
+  try {
+    const caption = `*${product.title}*\n${product.description ? `_${product.description}_\n` : ""}💰 ${product.price}\n🔗 ${product.link}`;
+
+    if (product.image) {
+      await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
+        chat_id: TELEGRAM_CHAT_ID,
+        photo: product.image,
+        caption: caption,
+        parse_mode: "Markdown"
+      });
+    } else {
+      await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        chat_id: TELEGRAM_CHAT_ID,
+        text: caption,
+        parse_mode: "Markdown"
+      });
+    }
+
+    console.log("📨 Telegram :", product.title);
+
+  } catch (err) {
+    console.log("Erreur Telegram bot :", err.response?.data || err.message);
+  }
+}
 
 async function main() {
-  console.log("🔄 Début du cycle...");
-  
-  // 1. Charger l'historique et la file d'attente
-  let data = await loadData();
-  let sentSet = new Set(data.sent);
-  let queue = data.queue || [];
+  console.log("🔎 Scan des 4 canaux Telegram...");
 
-  // 2. Scanner les canaux pour trouver des nouveaux produits
+  const sentLinks = await loadSentLinks();
+  console.log(`📋 ${sentLinks.size} liens déjà envoyés`);
+
+  let allProducts = [];
   for (const channel of TELEGRAM_CHANNELS) {
-    console.log(`📡 Scraping @${channel}...`);
-    const found = await getProductsFromTelegram(channel);
-    
-    // Ajouter seulement ceux qu'on n'a jamais vu (ni envoyé, ni déjà en queue)
-    found.forEach(p => {
-      if (!sentSet.has(p.link) && !queue.some(q => q.link === p.link)) {
-        queue.push(p);
-      }
-    });
+    const products = await getProductsFromTelegram(channel);
+    console.log(`📦 ${products.length} produits trouvés sur ${channel}`);
+    allProducts.push(...products);
   }
 
-  console.log(`📦 Produits en attente : ${queue.length}`);
+  const newProducts = allProducts.filter(p => !sentLinks.has(p.link));
+  console.log(`🆕 ${newProducts.length} nouveaux produits`);
 
-  if (queue.length === 0) {
-    console.log("✅ Rien de nouveau à envoyer.");
-    return;
-  }
-
-  // 3. Mélanger TOUTE la file d'attente (Aléatoire de tous les canaux)
-  queue = shuffle(queue);
-
-  // 4. Prendre les 5 premiers
-  const toSend = queue.splice(0, BATCH_SIZE);
+  const toSend = newProducts.slice(0, 3);
 
   for (const product of toSend) {
-    try {
-      await axios.post(WEBHOOK_URL, {
-        embeds: [{
-          title: product.title,
-          url: product.link,
-          description: `💰 **${product.price}**\n\n${product.description}`,
-          image: product.image ? { url: product.image } : null,
-          color: 0x00ff00,
-          footer: { text: "🛍️ Hacoo Deals Aléatoires" },
-          timestamp: new Date().toISOString()
-        }]
-      });
-      sentSet.add(product.link);
-      console.log(`✅ Envoyé : ${product.title}`);
-    } catch (e) {
-      console.log("❌ Erreur Discord");
-    }
-    await new Promise(r => setTimeout(r, 1500));
+    await sendToDiscord(product);
+    await sendToTelegram(product);
+    sentLinks.add(product.link);
+    await new Promise(r => setTimeout(r, 2000));
   }
 
-  // 5. Sauvegarder l'état mis à jour
-  await saveData([...sentSet], queue);
-  console.log(`⏳ Cycle terminé. Prochain scan dans 5 minutes.`);
+  if (toSend.length > 0) {
+    await saveSentLinks(sentLinks);
+  }
+
+  console.log("⏳ Prochain scan dans 2 minutes...");
 }
 
-// Lancement
-setInterval(main, INTERVAL_MS);
+setInterval(main, 2 * 60 * 1000);
 main();
+```
+
+## Tes 5 secrets GitHub
+```
+WEBHOOK_URL          = https://discord.com/api/webhooks/...
+GITHUB_TOKEN         = ton_token_github
+GIST_ID              = ton_gist_id
+TELEGRAM_BOT_TOKEN   = 123456789:AAF-ton-token
+TELEGRAM_CHAT_ID     = -1001234567890
