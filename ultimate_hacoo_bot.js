@@ -1,14 +1,14 @@
 const puppeteer = require("puppeteer");
 const axios = require("axios");
 
-const WEBHOOK_URL = process.env."https://discord.com/api/webhooks/1484555324810723398/5C_TiGKAdL0HlR6bfHOHPRyhVANsTuxvAplD0F3yDps8HTm-qd358cVP7tR5dCabOVIN";
+const WEBHOOK_URL = process.env.WEBHOOK_URL;"https://discord.com/api/webhooks/1484555324810723398/5C_TiGKAdL0HlR6bfHOHPRyhVANsTuxvAplD0F3yDps8HTm-qd358cVP7tR5dCabOVIN"
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GIST_ID = process.env.GIST_ID;
 
 const TELEGRAM_CHANNELS = [
   "https://t.me/s/hacoolinksydeuxx",
   "https://t.me/s/linkscrewfinds",
-  "https://t.me/s/mkfashionfinds"
+  "https://t.me/s/mkfashionfinds",
 ];
 
 async function loadSentLinks() {
@@ -46,45 +46,66 @@ async function getProductsFromTelegram(channelUrl) {
     args: ["--no-sandbox", "--disable-setuid-sandbox"]
   });
   const page = await browser.newPage();
-  await page.goto(channelUrl, { waitUntil: "networkidle2" });
-  await new Promise(r => setTimeout(r, 3000));
 
-  const products = await page.evaluate(() => {
-    const messages = document.querySelectorAll(".tgme_widget_message");
-    const results = [];
+  try {
+    await page.goto(channelUrl, { waitUntil: "networkidle2" });
+    await new Promise(r => setTimeout(r, 3000));
 
-    messages.forEach(msg => {
-      const linkEl = msg.querySelector('a[href*="c.onlyaff.app"]');
-      if (!linkEl) return;
-      const link = linkEl.href;
-
-      const imgEl =
-        msg.querySelector(".tgme_widget_message_photo_wrap") ||
-        msg.querySelector('a[style*="background-image"]');
-
-      let image = null;
-      if (imgEl) {
-        const style = imgEl.getAttribute("style") || "";
-        const match = style.match(/url\(['"]?(https?[^'")\s]+)['"]?\)/);
-        if (match) image = match[1];
+    // ✅ Scroll vers le haut pour charger un maximum de messages
+    await page.evaluate(async () => {
+      for (let i = 0; i < 10; i++) {
+        window.scrollTo(0, 0);
+        await new Promise(r => setTimeout(r, 1000));
       }
-
-      const textEl = msg.querySelector(".tgme_widget_message_text");
-      const fullText = textEl ? textEl.innerText.trim() : "";
-      const lines = fullText.split("\n").map(l => l.trim()).filter(Boolean);
-      const title = lines[0] || "Produit tendance";
-      const priceLine = lines.find(l => l.includes("€") || l.includes("$"));
-      const price = priceLine || "Prix inconnu";
-      const desc = lines.slice(1).filter(l => l !== price && !l.includes("c.onlyaff.app")).join(" • ");
-
-      results.push({ title, price, description: desc, image, link });
     });
 
-    return results;
-  });
+    await new Promise(r => setTimeout(r, 2000));
 
-  await browser.close();
-  return products;
+    const products = await page.evaluate(() => {
+      const messages = document.querySelectorAll(".tgme_widget_message");
+      const results = [];
+
+      messages.forEach(msg => {
+        const linkEl = msg.querySelector('a[href*="c.onlyaff.app"]');
+        if (!linkEl) return;
+        const link = linkEl.href;
+
+        const imgEl =
+          msg.querySelector(".tgme_widget_message_photo_wrap") ||
+          msg.querySelector('a[style*="background-image"]');
+
+        let image = null;
+        if (imgEl) {
+          const style = imgEl.getAttribute("style") || "";
+          const match = style.match(/url\(['"]?(https?[^'")\s]+)['"]?\)/);
+          if (match) image = match[1];
+        }
+
+        const textEl = msg.querySelector(".tgme_widget_message_text");
+        const fullText = textEl ? textEl.innerText.trim() : "";
+        const lines = fullText.split("\n").map(l => l.trim()).filter(Boolean);
+        const title = lines[0] || "Produit tendance";
+        const priceLine = lines.find(l => l.includes("€") || l.includes("$"));
+        const price = priceLine || "Prix inconnu";
+        const desc = lines
+          .slice(1)
+          .filter(l => l !== price && !l.includes("c.onlyaff.app"))
+          .join(" • ");
+
+        results.push({ title, price, description: desc, image, link });
+      });
+
+      return results;
+    });
+
+    await browser.close();
+    return products;
+
+  } catch (err) {
+    console.log("Erreur Telegram :", channelUrl, err.message);
+    await browser.close();
+    return [];
+  }
 }
 
 async function sendToDiscord(product) {
@@ -106,27 +127,31 @@ async function sendToDiscord(product) {
 
     await axios.post(WEBHOOK_URL, payload);
     console.log("✅ Envoyé :", product.title, "-", product.price);
+
   } catch (err) {
     console.log("Erreur Discord :", err.response?.data || err.message);
   }
 }
 
 async function main() {
-  console.log("🔎 Scan des canaux Telegram...");
+  console.log("🔎 Scan des 4 canaux Telegram...");
 
+  // ✅ Charger les liens déjà envoyés depuis le Gist (persistant)
   const sentLinks = await loadSentLinks();
   console.log(`📋 ${sentLinks.size} liens déjà envoyés`);
 
   let allProducts = [];
   for (const channel of TELEGRAM_CHANNELS) {
     const products = await getProductsFromTelegram(channel);
-    console.log(`📦 ${products.length} produits trouvés`);
+    console.log(`📦 ${products.length} produits trouvés sur ${channel}`);
     allProducts.push(...products);
   }
 
+  // ✅ Filtrer uniquement les nouveaux
   const newProducts = allProducts.filter(p => !sentLinks.has(p.link));
-  console.log(`🆕 ${newProducts.length} nouveaux produits`);
+  console.log(`🆕 ${newProducts.length} nouveaux produits à envoyer`);
 
+  // ✅ Envoyer 3 par cycle
   const toSend = newProducts.slice(0, 3);
 
   for (const product of toSend) {
@@ -135,6 +160,7 @@ async function main() {
     await new Promise(r => setTimeout(r, 2000));
   }
 
+  // ✅ Sauvegarder dans le Gist pour ne jamais renvoyer
   if (toSend.length > 0) {
     await saveSentLinks(sentLinks);
   }
@@ -146,15 +172,12 @@ setInterval(main, 2 * 60 * 1000);
 main();
 ```
 
-## Les 2 erreurs corrigées
+## Ce qu'il faut faire
 
-| Erreur | Correction |
-|---|---|
-| `process.env."https://discord..."` | `process.env.WEBHOOK_URL` |
-| Virgules manquantes entre les canaux | Ajout des `,` après chaque canal |
+**1. Remplace le 4ème canal** dans `TELEGRAM_CHANNELS`
 
-Et dans tes secrets GitHub tu mets :
+**2. Tes 3 secrets GitHub :**
 ```
-WEBHOOK_URL  = https://discord.com/api/webhooks/1484555.../5C_TiG...
-GITHUB_TOKEN = ton_token
-GIST_ID      = ton_gist_id
+WEBHOOK_URL   = https://discord.com/api/webhooks/ton_webhook
+GITHUB_TOKEN  = ton_token_github
+GIST_ID       = ton_gist_id
