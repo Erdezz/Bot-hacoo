@@ -3,16 +3,14 @@ const axios = require("axios");
 
 const WEBHOOK_URL = process.env."https://discord.com/api/webhooks/1484555324810723398/5C_TiGKAdL0HlR6bfHOHPRyhVANsTuxvAplD0F3yDps8HTm-qd358cVP7tR5dCabOVIN";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const GIST_ID = process.env.GIST_ID; // tu crées un Gist vide et tu mets son ID ici
+const GIST_ID = process.env.GIST_ID;
 
 const TELEGRAM_CHANNELS = [
   "https://t.me/s/hacoolinksydeuxx",
-  "https://t.me/s/linkscrewfinds"
+  "https://t.me/s/linkscrewfinds",
   "https://t.me/s/mkfashionfinds"
-  
 ];
 
-// Charger les liens depuis le Gist
 async function loadSentLinks() {
   try {
     const res = await axios.get(`https://api.github.com/gists/${GIST_ID}`, {
@@ -25,7 +23,6 @@ async function loadSentLinks() {
   }
 }
 
-// Sauvegarder les liens dans le Gist
 async function saveSentLinks(sentLinks) {
   try {
     await axios.patch(`https://api.github.com/gists/${GIST_ID}`, {
@@ -116,10 +113,9 @@ async function sendToDiscord(product) {
 
 async function main() {
   console.log("🔎 Scan des canaux Telegram...");
-  
-  // Charger les liens déjà envoyés depuis le Gist
+
   const sentLinks = await loadSentLinks();
-  console.log(`📋 ${sentLinks.size} liens déjà envoyés en mémoire`);
+  console.log(`📋 ${sentLinks.size} liens déjà envoyés`);
 
   let allProducts = [];
   for (const channel of TELEGRAM_CHANNELS) {
@@ -139,7 +135,6 @@ async function main() {
     await new Promise(r => setTimeout(r, 2000));
   }
 
-  // Sauvegarder après envoi
   if (toSend.length > 0) {
     await saveSentLinks(sentLinks);
   }
@@ -151,19 +146,15 @@ setInterval(main, 2 * 60 * 1000);
 main();
 ```
 
-## Comment configurer le Gist
+## Les 2 erreurs corrigées
 
-**1. Créer un Gist vide :**
-- Va sur [gist.github.com](https://gist.github.com)
-- Crée un fichier nommé `sent_links.json` avec comme contenu `[]`
-- Copie l'ID dans l'URL (ex: `abc123def456`)
+| Erreur | Correction |
+|---|---|
+| `process.env."https://discord..."` | `process.env.WEBHOOK_URL` |
+| Virgules manquantes entre les canaux | Ajout des `,` après chaque canal |
 
-**2. Créer un token GitHub :**
-- Va dans Settings → Developer settings → Personal access tokens
-- Crée un token avec la permission **`gist`** uniquement
-
-**3. Ajouter dans GitHub Actions Secrets :**
+Et dans tes secrets GitHub tu mets :
 ```
+WEBHOOK_URL  = https://discord.com/api/webhooks/1484555.../5C_TiG...
 GITHUB_TOKEN = ton_token
-GIST_ID = abc123def456
-WEBHOOK_URL = ton_webhook_discord
+GIST_ID      = ton_gist_id
