@@ -13,7 +13,7 @@ const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "8770013859:AAE3KknyIsHwujp
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "@Erdezz";
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;"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" 
-const GIST_ID = process.env.GIST_ID;"b303d0abe87fb107b23280c4b284ee70"
+const GIST_ID = process.env.GIST_ID;
 
 const TELEGRAM_CHANNELS = [
   "hacoolinksydeuxx",
