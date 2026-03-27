@@ -1,11 +1,8 @@
 const puppeteer = require("puppeteer");
 const axios = require("axios");
 
-const WEBHOOK_URL = process.env.WEBHOOK_URL;"https://discord.com/api/webhooks/1484555324810723398/5C_TiGKAdL0HlR6bfHOHPRyhVANsTuxvAplD0F3yDps8HTm-qd358cVP7tR5dCabOVIN";
+const WEBHOOK_URL = process.env.WEBHOOK_URL;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const GIST_ID = process.env.GIST_ID;
-const TELEGRAM_BOT_TOKEN = process.env.8623248061:AAH6rBf57jJNftcIOkmp2WruA67zCyC3Zj8;
-const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
 const TELEGRAM_CHANNELS = [
   "https://t.me/s/hacoolinksydeuxx",
@@ -54,7 +51,6 @@ async function getProductsFromTelegram(channelUrl) {
     await page.goto(channelUrl, { waitUntil: "networkidle2" });
     await new Promise(r => setTimeout(r, 3000));
 
-    // Scroll pour charger un maximum de messages
     await page.evaluate(async () => {
       for (let i = 0; i < 10; i++) {
         window.scrollTo(0, 0);
@@ -105,7 +101,7 @@ async function getProductsFromTelegram(channelUrl) {
     return products;
 
   } catch (err) {
-    console.log("Erreur Telegram :", channelUrl, err.message);
+    console.log("Erreur canal :", channelUrl, err.message);
     await browser.close();
     return [];
   }
@@ -196,12 +192,3 @@ async function main() {
 
 setInterval(main, 2 * 60 * 1000);
 main();
-```
-
-## Tes 5 secrets GitHub
-```
-WEBHOOK_URL          = https://discord.com/api/webhooks/...
-GITHUB_TOKEN         = ton_token_github
-GIST_ID              = ton_gist_id
-TELEGRAM_BOT_TOKEN   = 123456789:AAF-ton-token
-TELEGRAM_CHAT_ID     = -1001234567890
