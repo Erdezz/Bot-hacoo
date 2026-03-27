@@ -6,7 +6,7 @@ const TELEGRAM_CHANNEL = "https://t.me/s/hacoolinksydeuxx";
 
 let sentLinks = new Set();
 
-// Récupère tous les liens c.onlyaff.app depuis Telegram
+// Récupérer tous les liens c.onlyaff.app depuis Telegram
 async function getLinksFromTelegram() {
   const browser = await puppeteer.launch({
     headless: "new",
@@ -14,6 +14,8 @@ async function getLinksFromTelegram() {
   });
   const page = await browser.newPage();
   await page.goto(TELEGRAM_CHANNEL, { waitUntil: "networkidle2" });
+  
+  // remplacer waitForTimeout par Promise
   await new Promise(r => setTimeout(r, 3000));
 
   const links = await page.evaluate(() => {
@@ -26,7 +28,7 @@ async function getLinksFromTelegram() {
   return [...new Set(links)];
 }
 
-// Scraper produit complet
+// Scraper le produit complet
 async function scrapeProduct(url) {
   const browser = await puppeteer.launch({
     headless: "new",
@@ -36,24 +38,16 @@ async function scrapeProduct(url) {
 
   try {
     await page.goto(url, { waitUntil: "networkidle0", timeout: 60000 });
-    // attendre que le contenu principal charge
-    await page.waitForTimeout(4000);
+    // remplacer waitForTimeout
+    await new Promise(r => setTimeout(r, 4000));
 
     const data = await page.evaluate(() => {
-      // Titre produit
       const titleEl = document.querySelector("h1") || document.querySelector(".product-title");
-      const title = titleEl ? titleEl.innerText.trim() : "Produit tendance";
-
-      // Prix produit
       const priceEl = document.querySelector(".product-price") || document.querySelector("span.price");
-      const price = priceEl ? priceEl.innerText.trim() : "Prix inconnu";
-
-      // Image principale (peut être dans un slider ou background)
-      let img = null;
       const imgEl = document.querySelector(".product-image img") || document.querySelector("img");
-      if (imgEl) img = imgEl.src;
-      else {
-        // parfois image dans style background-image
+      let img = imgEl ? imgEl.src : null;
+
+      if (!img) {
         const bgEl = document.querySelector(".product-image");
         if (bgEl) {
           const bg = window.getComputedStyle(bgEl).getPropertyValue("background-image");
@@ -62,11 +56,14 @@ async function scrapeProduct(url) {
         }
       }
 
-      // Description
       const descEl = document.querySelector(".product-description") || document.querySelector("p");
-      const description = descEl ? descEl.innerText.trim() : "";
 
-      return { title, price, image: img, description };
+      return {
+        title: titleEl ? titleEl.innerText.trim() : "Produit tendance",
+        price: priceEl ? priceEl.innerText.trim() : "Prix inconnu",
+        image: img,
+        description: descEl ? descEl.innerText.trim() : ""
+      };
     });
 
     await page.close();
