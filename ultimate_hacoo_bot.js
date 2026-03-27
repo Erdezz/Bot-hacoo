@@ -6,7 +6,7 @@ const axios = require("axios");
 // ─────────────────────────────────────────────────────────────────────────────
 const CONFIG = {
     discordWebhook: "https://discord.com/api/webhooks/1484555324810723398/5C_TiGKAdL0HlR6bfHOHPRyhVANsTuxvAplD0F3yDps8HTm-qd358cVP7tR5dCabOVIN",
-    githubToken: "Erdezz",
+    githubToken: "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",
     gistId: "b303d0abe87fb107b23280c4b284ee70",
     telegramToken: "8770013859:AAE3KknyIsHwujpL_BgI3RAeWlDHbtEzrsU",
     telegramChatId: "-1003725676174", // Ton ID vérifié
