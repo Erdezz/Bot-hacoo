@@ -19,7 +19,7 @@ const TELEGRAM_CHANNELS = [
   "hacoolinksydeuxx",
   "linkscrewfinds",
   "mkfashionfinds",
-  "TON_4EME_CANAL",
+  "hacoolinksvip",
 ];
 
 const LOCAL_CACHE_FILE = path.join(__dirname, "sent_links_cache.json");
