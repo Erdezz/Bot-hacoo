@@ -24,6 +24,10 @@ const TELEGRAM_CHANNELS = [
   "hacoolinks10chanel",
   "iammmchannel",
   "mariehacoo",
+  "haccoyeplinks",
+  "hacoolinks",
+  "HacooLinksCarla1",
+  "hacoolinks10chanel",
 ];
 
 const LOCAL_CACHE_FILE = path.join(__dirname, "sent_links_cache.json");
